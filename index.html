@@ -237,6 +237,17 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:3px so
 .w[data-f]::after,.b[data-f]::after{content:attr(data-f);position:absolute;top:10px;left:50%;transform:translateX(-50%);width:22px;height:22px;line-height:22px;border-radius:50%;background:var(--sun);color:#1b1300;font:700 12px var(--body);text-align:center}
 .w.mark{box-shadow:inset 0 -5px 0 var(--sun)}
 .w.hit,.b.hit{background:var(--good)!important}
+/* tecla que estas sosteniendo: se llena de abajo hacia arriba */
+.w.holding::before,.b.holding::before{content:"";position:absolute;left:3px;right:3px;bottom:3px;height:calc((100% - 6px) * var(--p,0));background:var(--accent);opacity:.5;border-radius:4px;pointer-events:none}
+.kbnow{display:none;align-items:center;gap:10px;font-weight:700;color:var(--ink);font-size:15px}
+.kbnow .beats{margin:0}.kbnow .beat{width:18px;height:18px}.kbnow .beat.half{width:9px}
+.kbnow .fgb{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--sun);color:#1b1300;font-size:12px}
+/* modo tocar: teclado pegado abajo y partitura que se desliza sola */
+body.playing .kbcard{position:sticky;bottom:env(safe-area-inset-bottom,0px);z-index:15;box-shadow:0 -8px 28px rgb(16 18 23/.14)}
+body.playing #song{max-height:clamp(170px,30vh,320px);overflow-y:auto;overflow-x:hidden}
+body.playing #stepBody .lead{display:none}
+body.playing .kbnow{display:inline-flex}
+body.playing #kbHint{display:none}
 .w.miss,.b.miss{background:var(--bad)!important}
 .w.pulse{animation:pulse 1.2s ease-in-out infinite}
 @keyframes pulse{50%{background:color-mix(in srgb,var(--accent) 35%,var(--ivory))}}
@@ -337,7 +348,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:3px so
     </aside>
   </div>
   <section class="card kbcard">
-    <div class="kbhead"><span id="kbHint">Toca en la pantalla o en tu piano</span><span class="micinfo"><label class="sens">Sensibilidad <select id="sensSel" class="sel"><option value="1">Normal</option><option value="4">Alta</option><option value="12">Máxima</option></select></label><span class="meter" title="Nivel del micrófono"><i id="lvl"></i></span><span class="filter" id="filterTxt"></span></span></div>
+    <div class="kbhead"><span id="kbHint">Toca en la pantalla o en tu piano</span><span class="kbnow" id="kbNow"></span><span class="micinfo"><label class="sens">Sensibilidad <select id="sensSel" class="sel"><option value="1">Normal</option><option value="4">Alta</option><option value="12">Máxima</option></select></label><span class="meter" title="Nivel del micrófono"><i id="lvl"></i></span><span class="filter" id="filterTxt"></span></span></div>
     <div class="kbw"><div class="kb" id="kb"></div></div>
   </section>
 </main>
@@ -421,7 +432,7 @@ const $ = id => document.getElementById(id);
 function show(v) {
   ['vHome','vLevel','vLesson'].forEach(id => $(id).hidden = id !== v);
   window.scrollTo(0, 0);
-  if (v !== 'vLesson') stopAll();
+  if (v !== 'vLesson') { stopAll(); document.body.classList.remove('playing'); }
 }
 function renderHome() {
   const done = progress['1.1'] > 0 ? 1 : 0;
@@ -713,6 +724,7 @@ function goStep(i) {
   stopAll(); clearKb();
   if (PLAY.id !== '1.1') i = 4;   // cancion subida: solo el reproductor
   step = Math.max(0, Math.min(STEPS.length - 1, i));
+  document.body.classList.toggle('playing', step === 4);
   renderSteps();
   [s1, s2, s3, s4, s5][step]();
   wireNav();
@@ -882,24 +894,35 @@ function s5() {
   }
   function paint() {
     SONG.forEach((n, i) => { const g = $('n' + i); if (g) g.setAttribute('class', 'n' + (i < idx || (hold && i === idx && hold.done) ? ' ok' : '') + (i === idx && !finished ? ' cur' : '')); });
-    const g = $('n' + idx); if (g && !finished) { const r = g.getBoundingClientRect(), s = sheet.getBoundingClientRect(); if (r.top < s.top || r.bottom > s.bottom) g.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+    const g = $('n' + idx);
+    if (g && !finished) {   // la partitura se desliza sola: el renglon actual queda arriba
+      const r = g.getBoundingClientRect(), b = sheet.getBoundingClientRect();
+      if (Math.abs(r.top - b.top - 4) > 3) sheet.scrollTo({ top: sheet.scrollTop + (r.top - b.top) - 4, behavior: calm ? 'auto' : 'smooth' });
+    }
     $('sIdx').textContent = SONG.slice(0, idx + (hold ? 1 : 0)).filter(x => !x.rest).length + '/' + total; $('sMiss').textContent = misses; $('sEarly').textContent = early;
     const n = SONG[Math.min(idx, SONG.length - 1)], D = DUR[n.d];
     $('now').innerHTML = n.rest ? 'Pausa' : esN(n.m) + ' <small>' + oct(n.m) + '</small>';
     $('durTxt').textContent = (n.rest ? 'Silencio de ' : '') + (n.rest ? D.name : D.name[0].toUpperCase() + D.name.slice(1)) + ' · ' + beatsTxt(D.beats);
     $('hb').innerHTML = beatDots(D.beats);
     $('hsub').textContent = n.rest ? 'Descansa, no toques nada…' : hold ? 'Sostenla…' : (n.f ? 'Dedo ' + n.f + ' · ' : '') + 'esperando que la toques';
+    $('kbNow').innerHTML = (n.rest ? 'Pausa' : esN(n.m) + oct(n.m)) + (n.f && !n.rest ? ' <span class="fgb" title="Dedo">' + n.f + '</span>' : '') +
+      ' <span style="font-weight:500;color:var(--muted)">' + D.name + '</span> <span class="beats" id="kbBeats">' + beatDots(D.beats) + '</span>';
   }
   function tipFor(i) { if (SONG_TIPS[i]) say(SONG_TIPS[i]); }
+  function holdKey(i) {   // marca en el teclado la tecla que estas sosteniendo
+    document.querySelectorAll('.kb .holding').forEach(k => { k.classList.remove('holding'); k.style.removeProperty('--p'); });
+    if (i === null || SONG[i].rest) return null;
+    const k = keyEl(SONG[i].m); if (k) k.classList.add('holding'); return k;
+  }
   function startHold(i) {
     hold = { i, start: performance.now(), dur: DUR[SONG[i].d].beats * 60000 / bpm };
-    idx = i; paint(); setGuide();
+    idx = i; paint(); setGuide(); hold.key = holdKey(i);
     $('hsub').textContent = SONG[i].rest ? 'Descansa, no toques nada…' : 'Sostenla…';
     if (!ticker) ticker = requestAnimationFrame(tick);
   }
   function endHold() {
     const pf = $('pf' + hold.i); if (pf) pf.setAttribute('width', 20);
-    idx = hold.i + 1; hold = null;
+    idx = hold.i + 1; hold = null; holdKey(null);
     if (idx >= SONG.length) return finish();
     paint(); setGuide(); tipFor(idx);
     if (SONG[idx].rest) startHold(idx);   // los silencios avanzan solos
@@ -909,6 +932,8 @@ function s5() {
     const p = (performance.now() - hold.start) / hold.dur;
     const pf = $('pf' + hold.i); if (pf) pf.setAttribute('width', Math.min(20, p * 20));
     fillDots($('hb'), DUR[SONG[hold.i].d].beats, Math.min(1, p));
+    if ($('kbBeats')) fillDots($('kbBeats'), DUR[SONG[hold.i].d].beats, Math.min(1, p));
+    if (hold.key) hold.key.style.setProperty('--p', Math.min(1, p).toFixed(3));
     if (p >= 1) { endHold(); return; }
     ticker = requestAnimationFrame(tick);
   }
@@ -938,7 +963,8 @@ function s5() {
     }
   };
   function finish() {
-    finished = true; clearKb(); if (metro) { clearInterval(metro); metro = null; }
+    finished = true; clearKb(); holdKey(null); $('kbNow').innerHTML = ''; document.body.classList.remove('playing');
+    if (metro) { clearInterval(metro); metro = null; }
     const stars = misses === 0 && early <= 1 ? 3 : misses <= 3 && early <= 4 ? 2 : 1;
     if (lesson) { progress['1.1'] = Math.max(progress['1.1'] || 0, stars); saveProg(); $('xp').textContent = 120 + stars * 10; }
     say(stars === 3 ? (lesson ? '¡Perfecta! Sin fallos y con buen ritmo. Ya tocaste tu primera canción completa.' : '¡Perfecta! Sin fallos y con buen ritmo.') : stars === 2 ? '¡Muy bien! La terminaste. Repítela una vez más para ganar las 3 estrellas.' : 'La terminaste, y eso es lo importante. Vuelve a intentarla más despacio: baja el tempo.', 'ok');
@@ -1066,7 +1092,8 @@ function parseMusicXML(xml, fileName) {
         return;
       }
       if (ties.includes('stop') && !ties.includes('start') && notes.length && !notes[notes.length - 1].rest) return; // nota ligada: ya suena
-      notes.push({ p: nameOf(m), d: dk, f: 0, bar });
+      const fe = n.querySelector('fingering'), fv = fe ? parseInt(fe.textContent) : 0;
+      notes.push({ p: nameOf(m), d: dk, f: fv >= 1 && fv <= 5 ? fv : 0, bar });
     });
   });
   return { name, beats, beatType, fifths, notes };
@@ -1129,10 +1156,32 @@ function autoTips(S) {
   });
   return t;
 }
+// dedos sugeridos para la mano derecha: la mano se queda quieta mientras puede (5 teclas blancas),
+// y cuando hay que moverla buscamos la posicion que cubra mas de las siguientes notas
+function autoFinger(notes) {
+  const d = notes.map(n => n.rest ? null : dia(n.p));
+  let thumb = null;
+  notes.forEach((n, i) => {
+    if (d[i] === null) return;
+    if (n.f) { thumb = d[i] - n.f + 1; return; }            // si el archivo ya trae dedo, lo respetamos
+    if (thumb === null || d[i] < thumb || d[i] > thumb + 4) {
+      let best = d[i], bs = -1, bt = -1e9;
+      for (let t = d[i] - 4; t <= d[i]; t++) {
+        let sc = 0;
+        for (let j = i; j < Math.min(notes.length, i + 8); j++) { if (d[j] === null) continue; if (d[j] >= t && d[j] <= t + 4) sc++; else break; }
+        const tie = thumb === null ? -Math.abs(t - (d[i] - 2)) : -Math.abs(t - thumb);
+        if (sc > bs || (sc === bs && tie > bt)) { bs = sc; best = t; bt = tie; }
+      }
+      thumb = best;
+    }
+    n.f = d[i] - thumb + 1;
+  });
+  return notes;
+}
 function openSong(i) {
   const S = mySongs[i]; if (!S) return;
   PLAY = { id: 'custom', title: S.name, beats: S.beats, beatType: S.beatType, tips: autoTips(S),
-    song: S.notes.map(n => Object.assign({}, n, { m: toMidi(n.p) })) };
+    song: autoFinger(S.notes.map(n => Object.assign({}, n, { m: toMidi(n.p) }))) };
   lessonHeader(); show('vLesson'); goStep(4);
   say('Esta es tu canción. Te sigo nota por nota y te aviso cuando algo cambie.');
   setTimeout(() => { if (PLAY.tips[0]) say(PLAY.tips[0]); }, 2600);
