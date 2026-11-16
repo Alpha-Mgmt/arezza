@@ -203,6 +203,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:3px so
 .score{display:flex;gap:14px;font-size:13px;color:var(--muted);flex-wrap:wrap}
 .score b{color:var(--ink);font-variant-numeric:tabular-nums}
 .filter{font-size:12.5px;color:var(--muted);min-height:1.4em}
+.sens{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
 .micinfo{display:inline-flex;align-items:center;gap:10px}
 .meter{width:70px;height:6px;border-radius:3px;background:var(--line);overflow:hidden}
 .meter i{display:block;height:100%;width:0;background:var(--good);transition:width .06s linear}
@@ -336,7 +337,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:3px so
     </aside>
   </div>
   <section class="card kbcard">
-    <div class="kbhead"><span id="kbHint">Toca en la pantalla o en tu piano</span><span class="micinfo"><span class="meter" title="Nivel del micrófono"><i id="lvl"></i></span><span class="filter" id="filterTxt"></span></span></div>
+    <div class="kbhead"><span id="kbHint">Toca en la pantalla o en tu piano</span><span class="micinfo"><label class="sens">Sensibilidad <select id="sensSel" class="sel"><option value="1">Normal</option><option value="4">Alta</option><option value="12">Máxima</option></select></label><span class="meter" title="Nivel del micrófono"><i id="lvl"></i></span><span class="filter" id="filterTxt"></span></span></div>
     <div class="kbw"><div class="kb" id="kb"></div></div>
   </section>
 </main>
@@ -553,6 +554,9 @@ function renderSheet(el, notes, o) {
 }
 
 // ================= audio =================
+// iPad/iPhone: el mic llega muy bajito, asi que arrancamos con sensibilidad alta
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let micGain = null, sens = isIOS ? 4 : 1;
 let ctx, analyser, buf, stream, micSrc, raf = null, rmsSlow = 0, cap = null, lastOnset = 0, filtro = 'normal', anyOct = true;
 function ensureCtx() {
   if (!ctx) {
@@ -609,9 +613,9 @@ function makeTracker() {
     let r = 0; for (let i = 0; i < N; i++) r += buf[i] * buf[i]; r = Math.sqrt(r / N);
     let rs = 0; for (let i = N - 1024; i < N; i++) rs += buf[i] * buf[i]; rs = Math.sqrt(rs / 1024);
     // golpe de tecla nuevo (para notas repetidas). 180ms de pausa despues de aceptar una, si no el mismo golpe cuenta 3 veces
-    if (rs > 0.01 && rs > slow * 1.8 && now - lastHit > .18) armed = true;
+    if (rs > 0.006 && rs > slow * 1.8 && now - lastHit > .18) armed = true;
     slow = slow * .9 + rs * .1;
-    const f = r < 0.006 ? null : detect(buf, sr);
+    const f = r < 0.004 ? null : detect(buf, sr);
     if (!f) { if (++quiet > 6) { armed = true; judged = null; run = []; runMidi = null; } return { level: r }; }
     quiet = 0;
     const mf = 12 * Math.log2(f / 440) + 69, m = Math.round(mf);
@@ -644,7 +648,9 @@ $('micBtn').onclick = async () => {
   if (stream) { stopMic(); return; }
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
-    micSrc = ctx.createMediaStreamSource(stream); micSrc.connect(analyser);
+    micSrc = ctx.createMediaStreamSource(stream);
+    micGain = ctx.createGain(); micGain.gain.value = sens;          // amplifica lo que oye el mic
+    micSrc.connect(micGain); micGain.connect(analyser);
     if (!raf) micLoop();
     $('micBtn').classList.add('live'); $('micTxt').textContent = 'Escuchando';
     $('filterTxt').textContent = filtro !== 'off' ? 'Filtro de voz activo' : '';
@@ -654,7 +660,7 @@ $('micBtn').onclick = async () => {
 };
 function stopMic() {
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-  if (micSrc) { micSrc.disconnect(); micSrc = null; }
+  if (micSrc) { micSrc.disconnect(); micSrc = null; } if (micGain) { micGain.disconnect(); micGain = null; }
   if (raf) { cancelAnimationFrame(raf); raf = null; }
   $('micBtn').classList.remove('live'); $('micTxt').textContent = 'Usar micrófono'; $('filterTxt').textContent = '';
 }
@@ -1135,6 +1141,8 @@ function openSong(i) {
 // ================= arranque =================
 renderHome();
 renderMySongs();
+$('sensSel').value = String(sens);
+$('sensSel').onchange = e => { sens = +e.target.value; if (micGain) micGain.gain.value = sens; };
 </script>
 
 </body>
